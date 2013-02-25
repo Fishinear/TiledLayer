@@ -1,0 +1,32 @@
+TiledLayer is a replacement for iOS CATiledLayer, with many extra features:
+
+- different scaling factors for x and y directions
+- choose your own scaling steps (instead of only x2)
+- any layout of tiles possible
+- non-square tiles, different size tiles in one layer
+- match the scaling factor to the native resolution of your tiles
+- set a margin to load tiles just outside of the visible ones
+- you get notified when a tile is no longer needed
+- allow 'crisp' tiles: create tiles that have the same resolution as the screen
+
+USAGE:
+
+The tiles are actually objects: they must be, or derive from the Tile class,
+which is itself a CALayer. You create a class implementing the
+TileProvider interface and register that with the TiledLayer. This
+TileProvider is called by the TiledLayer every time a new tile is needed.
+The TileProvider has full control over how the tiling is done, how big
+the tiles are, what their native scale is, etc. The TiledLayer simply says
+"give me a tile that covers this point in the world".
+And it will keep requesting tiles like that until the visible area is
+filled.
+
+There is also a StandardTileProvider that uses zoomscales with a factor two.
+
+The header files have more documentation.
+
+A small ViewController class is included that shows a basic way of using
+the classes. In that one, the background of the tiles changes with
+zoomscale, so it is easy to see when it swaps to new tiles.
+
+
