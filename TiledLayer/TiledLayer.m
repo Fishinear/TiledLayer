@@ -65,7 +65,6 @@
 
 - (void) removeTile:(Tile *)tile
 {
-//    DLog(@"remove tile:%@", tile);
     [tile removeFromSuperlayer];
     tile.contents = nil;
     // inform provider
@@ -196,7 +195,7 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
         CGFloat highestCoveredY = point.y; // until where we have coverage by a hidden or real tile
         CGFloat currentNextY = point.y; // until where we have coverage by a visible tile
         NSMutableSet *tilesToKeep = [NSMutableSet set];
-        // tiles in the array are ordered by decreasing minY. We start from the end, therefore with the botttom-most tiles.
+        // tiles in the array are ordered by decreasing minY. We start from the end, therefore with the bottom-most tiles.
         // (with the smallest minY).
         for (int idx = tempTiles.count; idx >= 0; idx--) {
             CGFloat nextY = CGRectGetMaxY(bounds);
@@ -292,8 +291,10 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
             point.x += 100;
         }
     }
-    // make sure the new tiles are up to date
-    [self doRedraw];
+    // make sure the new tiles are drawn
+    for (InsertPoint *point in insertions) {
+        [point.tile redraw];
+    }
     dispatch_sync(dispatch_get_main_queue(), ^{
 		[self updateLayer];
 	});
@@ -309,9 +310,6 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
         for (InsertPoint *point in insertions) {
             Tile *newTile = point.tile;
             [self insertSublayer:newTile atIndex:point.index];
-            if (!newTile.hidden && newTile.contents == nil) {
-                [newTile setNeedsDisplay];
-            }
         }
         // now remove the tiles that are not visible
         [self removeTilesPassingTest:^BOOL(Tile *tile) {

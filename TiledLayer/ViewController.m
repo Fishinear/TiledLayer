@@ -27,9 +27,21 @@
     
     CGRect rect = CGContextGetClipBoundingBox(gc);
     
-    NSLog(@"tile zoom=%g\n", tile.nativeZoomX);
+    NSLog(@"tile bounds=%@ rect=%@ zoom=%g\n", NSStringFromCGRect(aLayer.bounds), NSStringFromCGRect(rect), tile.nativeZoomX);
     CGContextSetRGBFillColor(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomX, 1/tile.nativeZoomX, 1);
+    CGContextSetRGBFillColor(gc, 1, 1, 1, 1);
 	CGContextFillRect(gc, rect);
+    
+    CGContextSetRGBStrokeColor(gc, 0.9, 0.9, 0.9, 1);
+    CGContextSetLineWidth(gc, 2);
+    rect = CGRectInset(rect, 5, 5);
+    CGContextStrokeRect(gc, rect);
+    
+    CGContextSetRGBFillColor(gc, 0.9, 0.9, 0.9, 1);
+    CGContextSelectFont(gc, "Helvetica", 20, kCGEncodingMacRoman);
+    char text[20];
+    sprintf(text, "%g,%g", aLayer.bounds.origin.x, aLayer.bounds.origin.y);
+    CGContextShowTextAtPoint(gc, rect.origin.x + 5, rect.origin.y + 5, text, strlen(text));
     
     CGContextScaleCTM(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomY);
     CGContextSetLineWidth(gc, 30);
@@ -72,6 +84,8 @@
     UIScrollView *view = [[UIScrollView alloc] initWithFrame:frame];
     [self.view addSubview:view];
     provider = [[StandardTileProvider alloc] init];
+    provider.tileSizeX = 150;
+    provider.tileSizeY = 150;
     provider.delegate = self;
 
 	CALayer *centerLayer = [CALayer layer];
@@ -83,6 +97,7 @@
     
     tiledLayer = [TiledLayer layer];
     tiledLayer.provider = provider;
+    tiledLayer.geometryFlipped = YES;
     [centerLayer addSublayer:tiledLayer];
     
     UIGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinchGesture:)];

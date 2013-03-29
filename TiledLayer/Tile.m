@@ -19,7 +19,7 @@
 }
 
 // disable all animations on tiles
-- (id < CAAction >)actionForKey:(NSString *)key
+- (id <CAAction>) actionForKey:(NSString *)key
 {
     return nil;
 }
@@ -32,7 +32,6 @@
 - (void) redraw
 {
     if (self.delegate != nil) {
-//        DLog(@"tile=%@", self);
         
         CGFloat scale = [[UIScreen mainScreen] scale];
         CGSize size = CGSizeMake(self.bounds.size.width * scale, self.bounds.size.height * scale);
@@ -47,14 +46,23 @@
         
         CGImageRef cgImage = CGBitmapContextCreateImage(gc);
 
-//        DLog(@"set image for tile:%@", self);
         self.contents = (__bridge id) cgImage;
         [CATransaction flush];
-//        DLog(@"image set for tile:%@", self);
         CGImageRelease(cgImage);
         CGContextRelease(gc);
         CGColorSpaceRelease(rgbColorSpace);
     }
+}
+
+// do not call setNeedsDisplay on a tile. Call it on the TiledLayer instead
+- (void) setNeedsDisplay
+{
+    assert(NO);
+}
+
+- (void) setNeedsDisplayInRect:(CGRect)r
+{
+    assert(NO);
 }
 
 @end
