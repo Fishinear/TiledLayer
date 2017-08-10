@@ -29,7 +29,7 @@
     
     CGRect rect = CGContextGetClipBoundingBox(gc);
     
-    NSLog(@"tile bounds=%@ rect=%@ zoom=%g\n", NSStringFromCGRect(aLayer.bounds), NSStringFromCGRect(rect), tile.nativeZoomX);
+    NSLog(@"tile bounds=%@ rect=%@ zoom=%g / %g\n", NSStringFromCGRect(aLayer.bounds), NSStringFromCGRect(rect), tile.nativeZoomX, zoomScale);
     // fill the background with white
     CGContextSetGrayFillColor(gc, 1, 1);
     CGContextFillRect(gc, rect);
@@ -56,7 +56,20 @@
     CGContextScaleCTM(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomY);
     CGContextSetLineWidth(gc, 30);
     CGContextSetRGBStrokeColor(gc, 1, 1, 0, 1);
-    CGContextStrokeRect(gc, CGRectMake( -100, -100, 200, 300 ));
+    CGContextStrokeRect(gc, CGRectMake( -100, -200, 200, 300 ));
+}
+
+- (void) updateTransform:(TiledLayerFlags)flags
+{
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    
+    CATransform3D transform = CATransform3DMakeScale(1/zoomScale, 1/zoomScale, 1.0f);
+    tiledLayer.transform = CATransform3DTranslate(transform, origin.x, origin.y, 0);
+    
+    [CATransaction commit];
+    
+    [tiledLayer layoutTilesWithFlags:flags];
 }
 
 - (IBAction) handlePinchGesture:(UIPinchGestureRecognizer *)sender
@@ -70,15 +83,7 @@
         zoomScale = 1;
     }
 
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    
-    CATransform3D transform = CATransform3DMakeScale(1/zoomScale, 1/zoomScale, 1.0f);
-    tiledLayer.transform = CATransform3DTranslate(transform, origin.x, origin.y, 0);
-
-    [CATransaction commit];
-    
-    [tiledLayer layoutTilesWithFlags:TiledLayerAfterZoom];
+    [self updateTransform:TiledLayerAfterZoom];
 }
 
 - (IBAction) handlePanGesture:(UIPanGestureRecognizer *)sender
@@ -89,15 +94,7 @@
     CGPoint translation = [sender translationInView:self.view];
     origin = CGPointMake(originalOrigin.x + translation.x * zoomScale, originalOrigin.y + translation.y * zoomScale);
     
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    
-    CATransform3D transform = CATransform3DMakeScale(1/zoomScale, 1/zoomScale, 1.0f);
-    tiledLayer.transform = CATransform3DTranslate(transform, origin.x, origin.y, 0);
-    
-    [CATransaction commit];
-    
-    [tiledLayer layoutTilesWithFlags:0];
+    [self updateTransform:0];
 }
 
 - (void)viewDidLoad
