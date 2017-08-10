@@ -19,6 +19,8 @@
     TiledLayer *tiledLayer;
     double zoomScale;
     double originalZoomScale;
+    CGPoint origin;
+    CGPoint originalOrigin;
 }
 
 - (void) drawLayer:(CALayer *)aLayer inContext:(CGContextRef)gc
@@ -39,20 +41,22 @@
     CGContextStrokeRect(gc, CGRectInset(rect, 5, 5));
     
     // draw the explanatory text for debugging
-    // the new 'drawAtPoint:' makes this extremely complex
+    // the new 'drawAtPoint:' makes this extremely complex because if flips the text upside down
     NSString *text = [NSString stringWithFormat:@"%g,%g x%g", rect.origin.x, rect.origin.y, tile.nativeZoomX];
+    CGContextSaveGState(gc);
     UIGraphicsPushContext(gc);
     CGContextScaleCTM(gc, 1, -1);
     [text drawAtPoint:CGPointMake(10 + rect.origin.x, 10 - rect.size.height - rect.origin.y)
        withAttributes:@{NSFontAttributeName:[UIFont fontWithName:@"Helvetica" size:14],
                         NSForegroundColorAttributeName:debugColor}];
     UIGraphicsPopContext();
+    CGContextRestoreGState(gc);
     
-    // draw the real (example) contents of the tila
+    // draw the real (example) contents of the tile
     CGContextScaleCTM(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomY);
     CGContextSetLineWidth(gc, 30);
     CGContextSetRGBStrokeColor(gc, 1, 1, 0, 1);
-    CGContextStrokeRect(gc, CGRectMake( -100, -100, 200, 200 ));
+    CGContextStrokeRect(gc, CGRectMake( -100, -100, 200, 300 ));
 }
 
 - (IBAction) handlePinchGesture:(UIPinchGestureRecognizer *)sender
@@ -70,13 +74,31 @@
     [CATransaction setDisableActions:YES];
     
     CATransform3D transform = CATransform3DMakeScale(1/zoomScale, 1/zoomScale, 1.0f);
-    tiledLayer.transform = CATransform3DTranslate(transform, 0, 0, 0);
+    tiledLayer.transform = CATransform3DTranslate(transform, origin.x, origin.y, 0);
 
     [CATransaction commit];
     
     [tiledLayer layoutTilesWithFlags:TiledLayerAfterZoom];
 }
 
+- (IBAction) handlePanGesture:(UIPanGestureRecognizer *)sender
+{
+    if (sender.state == UIGestureRecognizerStateBegan) {
+        originalOrigin = origin;
+    }
+    CGPoint translation = [sender translationInView:self.view];
+    origin = CGPointMake(originalOrigin.x + translation.x * zoomScale, originalOrigin.y + translation.y * zoomScale);
+    
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    
+    CATransform3D transform = CATransform3DMakeScale(1/zoomScale, 1/zoomScale, 1.0f);
+    tiledLayer.transform = CATransform3DTranslate(transform, origin.x, origin.y, 0);
+    
+    [CATransaction commit];
+    
+    [tiledLayer layoutTilesWithFlags:0];
+}
 
 - (void)viewDidLoad
 {
@@ -107,6 +129,9 @@
     
     UIGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handlePinchGesture:)];
     [self.view addGestureRecognizer:pinch];
+    
+    UIGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanGesture:)];
+    [self.view addGestureRecognizer:pan];
     
     [tiledLayer layoutTilesWithFlags:TiledLayerAfterZoom];
 }
