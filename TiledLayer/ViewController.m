@@ -28,26 +28,31 @@
     CGRect rect = CGContextGetClipBoundingBox(gc);
     
     NSLog(@"tile bounds=%@ rect=%@ zoom=%g\n", NSStringFromCGRect(aLayer.bounds), NSStringFromCGRect(rect), tile.nativeZoomX);
-    CGContextSetRGBFillColor(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomX, 1/tile.nativeZoomX, 1);
-    CGContextSetRGBFillColor(gc, 1, 1, 1, 1);
-	CGContextFillRect(gc, rect);
+    // fill the background with white
+    CGContextSetGrayFillColor(gc, 1, 1);
+    CGContextFillRect(gc, rect);
     
-    CGContextSetRGBStrokeColor(gc, 0.9, 0.9, 0.9, 1);
+    // draw the boundary of the tile for debugging
+    UIColor *debugColor = [UIColor colorWithWhite:0.8 alpha:1];
+    CGContextSetStrokeColorWithColor(gc, debugColor.CGColor);
     CGContextSetLineWidth(gc, 2);
-    rect = CGRectInset(rect, 5, 5);
-    CGContextStrokeRect(gc, rect);
+    CGContextStrokeRect(gc, CGRectInset(rect, 5, 5));
     
-    CGContextSetRGBFillColor(gc, 0.9, 0.9, 0.9, 1);
-    CGContextSelectFont(gc, "Helvetica", 20, kCGEncodingMacRoman);
-    char text[20];
-    sprintf(text, "%g,%g", aLayer.bounds.origin.x, aLayer.bounds.origin.y);
-    CGContextShowTextAtPoint(gc, rect.origin.x + 5, rect.origin.y + 5, text, strlen(text));
+    // draw the explanatory text for debugging
+    // the new 'drawAtPoint:' makes this extremely complex
+    NSString *text = [NSString stringWithFormat:@"%g,%g x%g", rect.origin.x, rect.origin.y, tile.nativeZoomX];
+    UIGraphicsPushContext(gc);
+    CGContextScaleCTM(gc, 1, -1);
+    [text drawAtPoint:CGPointMake(10 + rect.origin.x, 10 - rect.size.height - rect.origin.y)
+       withAttributes:@{NSFontAttributeName:[UIFont fontWithName:@"Helvetica" size:14],
+                        NSForegroundColorAttributeName:debugColor}];
+    UIGraphicsPopContext();
     
+    // draw the real (example) contents of the tila
     CGContextScaleCTM(gc, 1/tile.nativeZoomX, 1/tile.nativeZoomY);
     CGContextSetLineWidth(gc, 30);
     CGContextSetRGBStrokeColor(gc, 1, 1, 0, 1);
     CGContextStrokeRect(gc, CGRectMake( -100, -100, 200, 200 ));
-    
 }
 
 - (IBAction) handlePinchGesture:(UIPinchGestureRecognizer *)sender
@@ -80,20 +85,20 @@
     
     zoomScale = 1;
     
-    CGRect frame = CGRectMake(0, 0, 320, 320);
+    CGRect frame = self.view.bounds;
     UIScrollView *view = [[UIScrollView alloc] initWithFrame:frame];
     [self.view addSubview:view];
     provider = [[StandardTileProvider alloc] init];
-    provider.tileSizeX = 150;
-    provider.tileSizeY = 150;
+    provider.tileSizeX = 160;
+    provider.tileSizeY = 160;
     provider.delegate = self;
-
-	CALayer *centerLayer = [CALayer layer];
-	centerLayer.position = CGPointMake(160, 160);
-    centerLayer.bounds = CGRectMake(-160, -160, 320, 320);
-	centerLayer.masksToBounds = YES;
+    
+    CALayer *centerLayer = [CALayer layer];
+    centerLayer.position = CGPointMake(frame.size.width/2, frame.size.height/2);
+    centerLayer.bounds = CGRectMake(-frame.size.width/2, -frame.size.height/2, frame.size.width, frame.size.height);
+    centerLayer.masksToBounds = YES;
     centerLayer.backgroundColor = [UIColor whiteColor].CGColor;
-	[[self.view layer] addSublayer:centerLayer];
+    [[self.view layer] addSublayer:centerLayer];
     
     tiledLayer = [TiledLayer layer];
     tiledLayer.provider = provider;

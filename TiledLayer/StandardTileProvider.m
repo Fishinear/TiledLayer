@@ -27,6 +27,9 @@ unsigned int floorToFactor2( unsigned int v )
     return zoom;
 }
 
+@interface StandardTileProvider () <CALayerDelegate>
+@end
+
 @implementation StandardTileProvider
 
 @synthesize tileSizeX;
@@ -53,10 +56,10 @@ unsigned int floorToFactor2( unsigned int v )
 {
     if (!crisp) {
         if (!crispX) {
-            scaleX = floorToFactor2(scaleX * HIGHLIMIT);
+            scaleX = floorToFactor2(scaleX / LOWLIMIT);
         }
         if (!crispY) {
-            scaleY = floorToFactor2(scaleY * HIGHLIMIT);
+            scaleY = floorToFactor2(scaleY / LOWLIMIT);
         }
     }
     point = CGPointMake(point.x/scaleX, point.y/scaleY);

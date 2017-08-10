@@ -3,11 +3,11 @@
 //  Flyskyhy
 //
 //  Created by René Dekker on 31/05/2012.
-//  Copyright (c) 2012 Renevision. All rights reserved.
+//  Copyright (c) 2012-2017 Renevision. All rights reserved.
 //
 
 #import "TiledLayer.h"
-#import <libkern/OSAtomic.h>
+#import <stdatomic.h>
 
 #define ZPOS_VALIDZOOM 1
 #define ACC  (1e-3f)
@@ -39,10 +39,11 @@
     float zoomScaleY;
     NSMutableArray *tempTiles;
     NSMutableArray *insertions;
-    TiledLayerFlags neededFlags;
-    int redrawNeeded;
+    _Atomic TiledLayerFlags neededFlags;
+    atomic_flag redrawNeeded;
     NSSet *theTiles;
     NSMutableSet *totalTilesToKeep;
+    bool isBlocked;
 }
 
 @synthesize provider;
@@ -88,15 +89,16 @@
 
 - (Tile *) addNewTileForPoint:(CGPoint)point atIndex:(int)idx crisp:(bool)crisp
 {
-    
     Tile *newTile = [provider provideTileAtPoint:point withScaleX:zoomScaleX scaleY:zoomScaleY crisp:crisp];
     newTile.actions = [[NSMutableDictionary alloc] initWithObjectsAndKeys:[NSNull null], @"zPosition", nil];
     newTile.zPosition = ZPOS_VALIDZOOM;
     newTile.transform = CATransform3DMakeScale(newTile.nativeZoomX, newTile.nativeZoomY, 1.0);
-    newTile.edgeAntialiasingMask = 0;    
+    newTile.edgeAntialiasingMask = 0;
     
     // safety check: check that tile actually includes point
-    if (!CGRectContainsPoint(newTile.frame, point)) {
+    CGFloat accX = MAX(zoomScaleX / 2, 1); // accuracy is half a pixel
+    CGFloat accY = MAX(zoomScaleY / 2, 1);
+    if (!CGRectContainsPoint(CGRectInset(newTile.frame, -accX, -accY), point)) {
         [self removeTile:newTile];
         return nil;
     }
@@ -121,11 +123,12 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
 {
     double dx = point2.x - point1.x;
     double dy = point2.y - point1.y;
-    return sqrt(dx*dx + dy*dy );
+    return hypot(dx, dy);
 };
 
 - (bool) determineZoom:(CALayer *)rootLayer flags:(TiledLayerFlags)flags
 {
+    //    DLog(@"%p rootLayer=%@ flags=%d", self, rootLayer, flags);
     CGPoint zero = [self convertPoint:CGPointZero toLayer:rootLayer];
     CGPoint xpoint = [self convertPoint:CGPointMake(100, 0) toLayer:rootLayer];
     CGPoint ypoint = [self convertPoint:CGPointMake(0, 100) toLayer:rootLayer];
@@ -151,22 +154,23 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
                 outdatedTiles++;
             }
         }
+        //        DLog(@"tile=%@ zpos=%g", tile, tile.zPosition);
     }
     zoomScaleX = zoomX;
     zoomScaleY = zoomY;
     return outdatedTiles == 0;
 }
 
-- (void) updateExposedRectWithTile:(CGRect)frame outsideBounds:(CGRect)bounds 
+- (void) updateExposedRectWithTile:(CGRect)frame outsideBounds:(CGRect)bounds
 {
     CGFloat minx = CGRectGetMinX(frame);
     if (minx <= CGRectGetMinX(bounds) && minx > CGRectGetMinX(exposedRect)) {
-        exposedRect.size.width -= minx - exposedRect.origin.x; 
+        exposedRect.size.width -= minx - exposedRect.origin.x;
         exposedRect.origin.x = minx;
     }
     CGFloat miny = CGRectGetMinY(frame);
     if (miny <= CGRectGetMinY(bounds) && miny > CGRectGetMinY(exposedRect)) {
-        exposedRect.size.height -= miny - exposedRect.origin.y; 
+        exposedRect.size.height -= miny - exposedRect.origin.y;
         exposedRect.origin.y = miny;
     }
     CGFloat maxx = CGRectGetMaxX(frame);
@@ -180,28 +184,30 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
 }
 
 - (void) doLayoutTilesWithBounds:(CGRect)bounds crisp:(bool)crisp
-{    
-    CGFloat accX = zoomScaleX / 2; // accuracy is half a pixel
-    CGFloat accY = zoomScaleY / 2;
+{
+    CGFloat accX = MAX(zoomScaleX / 2, 1); // accuracy is half a pixel
+    CGFloat accY = MAX(zoomScaleY / 2, 1);
     CGPoint point = bounds.origin;
     exposedRect = CGRectInfinite;
     totalTilesToKeep = [NSMutableSet set];
     insertions = [NSMutableArray array];
     CGRect boundsForExposure = CGRectInset(bounds, accX, accY);
-    while (point.x < CGRectGetMaxX(bounds)) {
+    while ((point.x += accX) < CGRectGetMaxX(bounds)) {
         // go through one vertical line at location point.x
+        //                DLog(@"----- x line: %g", point.x);
         point.y = CGRectGetMinY(bounds);
         CGFloat nextX = CGRectGetMaxX(bounds);
         CGFloat highestCoveredY = point.y; // until where we have coverage by a hidden or real tile
         CGFloat currentNextY = point.y; // until where we have coverage by a visible tile
         NSMutableSet *tilesToKeep = [NSMutableSet set];
-        // tiles in the array are ordered by decreasing minY. We start from the end, therefore with the bottom-most tiles.
+        // tiles in the array are ordered by decreasing minY. We start from the end, therefore with the botttom-most tiles.
         // (with the smallest minY).
-        for (int idx = tempTiles.count; idx >= 0; idx--) {
+        for (int idx = (int) tempTiles.count; idx >= 0; idx--) {
             CGFloat nextY = CGRectGetMaxY(bounds);
             Tile *tile;
             if (idx > 0) {
                 tile = [tempTiles objectAtIndex:idx-1];
+                //                                DLog(@"Examining tile:%@ for point:%@", tile, NSStringFromCGPoint(point));
                 if (CGRectGetMinY(tile.frame) < nextY) {
                     nextY = CGRectGetMinY(tile.frame);
                     CGFloat rightEdge = CGRectGetMaxX(tile.frame);
@@ -223,11 +229,12 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
             while (nextY > point.y) {
                 // we have a gap between the current tile and the previous ones
                 Tile *newTile;
+                //                                DLog(@"Gap detected: nextY=%g point.y=%g", nextY, point.y);
                 if (highestCoveredY + accY < nextY &&
                     // the gap is at least partly real. Request a tile to fill it, then check again.
                     (newTile = [self addNewTileForPoint:CGPointMake(point.x, highestCoveredY + accY) atIndex:idx crisp:crisp]) != nil)
                 {
-                    // increment the index, so the existing tile is re-examined again in the next cycle of the loop 
+                    // increment the index, so the existing tile is re-examined again in the next cycle of the loop
                     idx++;
                     tile = newTile;
                     nextY = CGRectGetMinY(tile.frame);
@@ -284,44 +291,43 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
             }
         } // end for each tile
         if (nextX > point.x) {
-            point.x = nextX + accX;
+            point.x = nextX;
         } else {
             // internal error: we should have requested a tile in this situation
-            NSLog(@"INTERNAL ERROR - failed to request tile for point:%@", NSStringFromCGPoint(point));
             point.x += 100;
         }
     }
-    // make sure the new tiles are drawn
+    tempTiles = nil;
+    //    DLog(@"redraw new tiles");
+    // make sure the new tiles are up to date
     for (InsertPoint *point in insertions) {
         [point.tile redraw];
     }
-    dispatch_sync(dispatch_get_main_queue(), ^{
-		[self updateLayer];
-	});
 }
 
 - (void) updateLayer
 {
-    @autoreleasepool {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        
-        // add the new tiles
-        for (InsertPoint *point in insertions) {
-            Tile *newTile = point.tile;
-            [self insertSublayer:newTile atIndex:point.index];
-        }
-        // now remove the tiles that are not visible
-        [self removeTilesPassingTest:^BOOL(Tile *tile) {
-            return ![totalTilesToKeep containsObject:tile];
-        }];
-        [CATransaction commit];
-        tempTiles = nil;
-        insertions = nil;
+    //    @autoreleasepool {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    
+    // add the new tiles
+    for (InsertPoint *point in insertions) {
+        Tile *newTile = point.tile;
+        [self insertSublayer:newTile atIndex:point.index];
     }
-   
-    int flags = OSAtomicAnd32(~TiledLayerLayoutOngoing, &neededFlags);
-    if (flags != 0) {
+    // now remove the tiles that are not visible
+    [self removeTilesPassingTest:^BOOL(Tile *tile) {
+        return ![totalTilesToKeep containsObject:tile];
+    }];
+    [CATransaction commit];
+    insertions = nil;
+    //    }
+    
+    // flags = neededFlags &= ~TiledLayerLayoutOngoing;
+    
+    TiledLayerFlags flags = atomic_fetch_and(&neededFlags, ~TiledLayerLayoutOngoing);
+    if ((flags & TiledLayerLayoutNeeded) != 0) {
         [self layoutTilesWithFlags:flags];
     }
 }
@@ -330,19 +336,31 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
 {
     CALayer *layer = self;
     while (!layer.masksToBounds && layer.superlayer != nil) {
-        layer = layer.superlayer;        
+        layer = layer.superlayer;
     }
     return layer;
 }
 
 - (void) layoutTilesWithFlags:(TiledLayerFlags)flags
 {
-    if (OSAtomicOr32Orig(flags | TiledLayerLayoutNeeded|TiledLayerLayoutOngoing, &neededFlags) & TiledLayerLayoutOngoing) {
+    if (isBlocked && (flags & TiledLayerUnblock) == 0) {
+        return;
+    }
+    isBlocked = NO;
+    if (provider == nil) {
+        return;
+    }
+    // origFlags = neededFlags;
+    // neededFlags |= flags | TiledLayerLayoutNeeded|TiledLayerLayoutOngoing
+    // if (origFlags & TiledLayerLayoutOngoing) { return; }
+    TiledLayerFlags originalFlags = atomic_fetch_or(&neededFlags, flags | TiledLayerLayoutNeeded|TiledLayerLayoutOngoing);
+    if (originalFlags & TiledLayerLayoutOngoing) {
         return;
     }
     CALayer *rootLayer = [self determineRootLayer];
     bool noChange;
     CGRect bounds;
+    uint32_t value = 0;
     do {
         flags = neededFlags;
         
@@ -353,17 +371,25 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
         CGRect requiredBounds = [self convertRect:rootLayer.bounds fromLayer:rootLayer];
         bounds = CGRectInset(requiredBounds, -(marginX - 0.5) * zoomScaleX, -(marginY - 0.5) * zoomScaleY);
         noChange = noChange && CGRectContainsRect(exposedRect, bounds);
-    } while (!OSAtomicCompareAndSwapInt(flags, noChange ? 0 : TiledLayerLayoutOngoing, (int *)&neededFlags));
+        // if (flags == neededFlags) {
+        //    neededFlags = noChange ? 0 : TiledLayerLayoutOngoing;
+        //    break;
+        // }
+        value = noChange ? 0 : TiledLayerLayoutOngoing;
+    } while (!atomic_compare_exchange_weak(&neededFlags, &flags, value));
     if (noChange) {
         return;
     }
-
+    
     tempTiles = [NSMutableArray array];
     [tempTiles addObjectsFromArray:self.sublayers];
-
-	dispatch_async(queue, ^{
+    
+    dispatch_async(queue, ^{
         [self doLayoutTilesWithBounds:bounds crisp:(flags & TiledLayerCrisp) != 0];
-	});
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            [self updateLayer];
+        });
+    });
 }
 
 - (void) layoutTiles
@@ -371,27 +397,28 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
     [self layoutTilesWithFlags:0];
 }
 
-- (void) removeAll
+- (void) removeAllAndBlock:(bool)blocked
 {
+    isBlocked = blocked;
     [self removeTilesPassingTest:^BOOL(Tile *tile) { return YES; }];
     exposedRect = CGRectNull;
 }
 
-- (void) doRedraw
-{
-    if (OSAtomicCompareAndSwapInt(1, 0, &redrawNeeded)) {
-        for (Tile *tile in totalTilesToKeep) {
-            [tile redraw];
-        }
-    }
-}
-
 - (void) setNeedsDisplay
 {
-    if (OSAtomicCompareAndSwapInt(0, 1, &redrawNeeded)) {
+    if (isBlocked) {
+        return;
+    }
+    // if (redrawNeeded == 0) { redrawNeeded = 1; ... }
+    if (!atomic_flag_test_and_set(&redrawNeeded)) {
         dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, 1000);
         dispatch_after(popTime, queue, ^{
-            [self doRedraw];
+            // Reset the flag and then do the redraw. If setNeedsDisplay is called during that time,
+            // then a new redraw will be queued
+            atomic_flag_clear(&redrawNeeded);
+            for (Tile *tile in totalTilesToKeep) {
+                [tile redraw];
+            }
         });
     }
 }
@@ -400,12 +427,12 @@ static double distanceBetweenTwoPoints(CGPoint point1,CGPoint point2)
 
 static dispatch_queue_t queue;
 
-+ (void)initialize
++ (void) initialize
 {
     if (self != [TiledLayer class]) {
         return;
     }
-	queue = dispatch_queue_create("com.renevision.TiledLayer", NULL);
+    queue = dispatch_queue_create("com.renevision.TiledLayer", NULL);
 }
 
 - (id) init
@@ -419,11 +446,13 @@ static dispatch_queue_t queue;
     marginX = 50;
     marginY = 50;
     keepOffScaleTiles = NO;
-    redrawNeeded = 0;
+    atomic_flag_clear(&redrawNeeded);
+    isBlocked = NO;
     totalTilesToKeep = [NSMutableSet set];
+    neededFlags = 0;
     self.actions = [[NSMutableDictionary alloc] initWithObjectsAndKeys:[NSNull null], @"zPosition", nil];
     self.bounds = CGRectMake(-1, -1, 2, 2);
-
+    
     return self;
 }
 
